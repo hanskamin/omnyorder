@@ -1,6 +1,6 @@
 """
 FastAPI Voice Agent Backend
-Real-time voice conversation with Deepgram Flux, OpenAI, and TTS
+Real-time voice conversation with Deepgram Flux, OpenAI, and ElevenLabs TTS
 """
 
 import asyncio
@@ -9,6 +9,7 @@ import logging
 import os
 import struct
 from datetime import datetime
+from io import BytesIO
 from typing import Dict, Any, List, Optional, Union
 from enum import Enum
 
@@ -21,6 +22,8 @@ from deepgram import (
     SpeakWebSocketEvents,
     SpeakWSOptions,
 )
+from elevenlabs import VoiceSettings
+from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,11 +33,16 @@ FLUX_URL = "wss://api.deepgram.com/v2/listen"
 FLUX_ENCODING = "linear16"
 SAMPLE_RATE = 16000
 OPENAI_LLM_MODEL = "gpt-4o-mini"
-DEEPGRAM_TTS_MODEL = "aura-2-phoebe-en"
+DEEPGRAM_TTS_MODEL = "aura-2-phoebe-en"  # Kept for legacy compatibility
+ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam voice (default)
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-SYSTEM_PROMPT = """You are a helpful voice assistant powered by Deepgram Flux and OpenAI.
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+elevenlabs = ElevenLabs(
+    api_key=ELEVENLABS_API_KEY,
+)
+SYSTEM_PROMPT = """You are a helpful voice assistant powered by Deepgram Flux, OpenAI, and ElevenLabs.
 You should:
 - Keep responses conversational and natural
 - Be concise but helpful
@@ -120,67 +128,57 @@ async def generate_agent_reply(
 
 
 async def generate_tts_audio(text: str, session_id: str, config: Dict[str, Any]) -> Optional[bytes]:
-    """Generate TTS audio using Deepgram."""
+    """Generate TTS audio using ElevenLabs."""
     
     logger.info(f"Session {session_id}: Generating TTS for: '{text}'")
     
     try:
-        dg_tts_ws = DeepgramClient(api_key=DEEPGRAM_API_KEY).speak.websocket.v("1")
-        audio_queue: asyncio.Queue[Union[bytes, TTSEvent]] = asyncio.Queue()
+        # Run the blocking ElevenLabs API call in a thread pool
         loop = asyncio.get_running_loop()
         
-        # Event handlers
-        def on_binary_data(self, data, **kwargs):
-            asyncio.run_coroutine_threadsafe(audio_queue.put(data), loop)
+        def text_to_speech_stream(text: str) -> BytesIO:
+            """Perform text-to-speech conversion using ElevenLabs."""
+            # Get voice_id from config or use default (Adam)
+            voice_id = config.get('elevenlabs_voice_id', 'pNInz6obpgDQGcFmaJgB')
+            
+            # Perform the text-to-speech conversion
+            response = elevenlabs.text_to_speech.convert(
+                voice_id=voice_id,
+                output_format="mp3_22050_32",
+                text=text,
+                model_id="eleven_multilingual_v2",
+                # Optional voice settings for customization
+                voice_settings=VoiceSettings(
+                    stability=0.0,
+                    similarity_boost=1.0,
+                    style=0.0,
+                    use_speaker_boost=True,
+                    speed=1.0,
+                ),
+            )
+            
+            # Create a BytesIO object to hold the audio data in memory
+            audio_stream = BytesIO()
+            
+            # Write each chunk of audio data to the stream
+            for chunk in response:
+                if chunk:
+                    audio_stream.write(chunk)
+            
+            # Reset stream position to the beginning
+            audio_stream.seek(0)
+            
+            return audio_stream
         
-        def on_flushed(self, **kwargs):
-            asyncio.run_coroutine_threadsafe(audio_queue.put(TTSEvent.FLUSHED), loop)
+        # Run the blocking call in a thread pool
+        audio_stream = await loop.run_in_executor(None, text_to_speech_stream, text)
         
-        def on_error(self, error, **kwargs):
-            logger.error(f"Session {session_id}: TTS error: {error}")
+        # Get the audio bytes
+        audio_bytes = audio_stream.getvalue()
         
-        # Register handlers
-        dg_tts_ws.on(SpeakWebSocketEvents.AudioData, on_binary_data)
-        dg_tts_ws.on(SpeakWebSocketEvents.Flushed, on_flushed)
-        dg_tts_ws.on(SpeakWebSocketEvents.Error, on_error)
-        
-        # TTS options
-        tts_options = SpeakWSOptions(
-            model=config['tts_model'],
-            encoding="linear16",
-            sample_rate=config['sample_rate']
-        )
-        
-        # Start TTS
-        if not dg_tts_ws.start(tts_options):
-            logger.error(f"Session {session_id}: TTS start failed")
-            return None
-        
-        # Send text
-        dg_tts_ws.send_text(text)
-        dg_tts_ws.flush()
-        
-        # Collect audio
-        audio_chunks = []
-        timeout = 10.0
-        
-        while True:
-            try:
-                chunk = await asyncio.wait_for(audio_queue.get(), timeout=timeout)
-                if chunk == TTSEvent.FLUSHED:
-                    break
-                elif isinstance(chunk, bytes):
-                    audio_chunks.append(chunk)
-            except asyncio.TimeoutError:
-                logger.warning(f"Session {session_id}: TTS timeout")
-                break
-        
-        dg_tts_ws.finish()
-        
-        if audio_chunks:
-            combined_audio = b''.join(audio_chunks)
-            logger.info(f"Session {session_id}: TTS complete: {len(combined_audio)} bytes")
-            return combined_audio
+        if audio_bytes:
+            logger.info(f"Session {session_id}: TTS complete: {len(audio_bytes)} bytes (MP3)")
+            return audio_bytes
         
         return None
         
@@ -333,7 +331,8 @@ async def voice_websocket(websocket: WebSocket):
         'config': {
             'sample_rate': SAMPLE_RATE,
             'llm_model': OPENAI_LLM_MODEL,
-            'tts_model': DEEPGRAM_TTS_MODEL,
+            'tts_model': DEEPGRAM_TTS_MODEL,  # Legacy field
+            'elevenlabs_voice_id': ELEVENLABS_VOICE_ID,  # Now using ElevenLabs
         },
         'conversation_active': False,
         'audio_buffer': [],

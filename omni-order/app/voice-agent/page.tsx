@@ -12,23 +12,11 @@ interface Config {
   sample_rate: number
   llm_model: string
   tts_model: string
+  elevenlabs_voice_id: string
 }
 
 type ConversationState = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
 
-const TTS_MODELS = [
-  { value: 'aura-2-phoebe-en', label: 'Phoebe (Female, US English)' },
-  { value: 'aura-2-apollo-en', label: 'Apollo (Male, US English)' },
-  { value: 'aura-2-stella-en', label: 'Stella (Female, US English)' },
-  { value: 'aura-2-luna-en', label: 'Luna (Female, US English)' },
-  { value: 'aura-2-mars-en', label: 'Mars (Male, US English)' },
-]
-
-const LLM_MODELS = [
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast & Cost-effective)' },
-  { value: 'gpt-4o', label: 'GPT-4o (Best Quality)' },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (Legacy)' },
-]
 
 export default function VoiceAgentPage() {
   // State
@@ -47,6 +35,7 @@ export default function VoiceAgentPage() {
     sample_rate: 16000,
     llm_model: 'gpt-4o-mini',
     tts_model: 'aura-2-phoebe-en',
+    elevenlabs_voice_id: 'pNInz6obpgDQGcFmaJgB', // Adam voice
   })
   
   // Refs
@@ -264,7 +253,7 @@ export default function VoiceAgentPage() {
     console.log('Audio processing setup complete, isRecordingRef.current =', isRecordingRef.current)
   }, [])
   
-  // Play audio
+  // Play audio (now handles MP3 from ElevenLabs)
   const playAudio = async (audioBytes: Uint8Array) => {
     try {
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
@@ -275,8 +264,15 @@ export default function VoiceAgentPage() {
         await audioContextRef.current.resume()
       }
       
-      const wavBuffer = createWAVBuffer(audioBytes, config.sample_rate)
-      const audioBuffer = await audioContextRef.current.decodeAudioData(wavBuffer)
+      // Convert Uint8Array to ArrayBuffer for decoding
+      // ElevenLabs sends MP3, which AudioContext can decode natively
+      const arrayBuffer: ArrayBuffer = audioBytes.buffer.slice(
+        audioBytes.byteOffset,
+        audioBytes.byteOffset + audioBytes.byteLength
+      ) as ArrayBuffer
+      
+      // Decode MP3 audio directly (no WAV wrapper needed)
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer)
       
       const source = audioContextRef.current.createBufferSource()
       source.buffer = audioBuffer
@@ -287,42 +283,11 @@ export default function VoiceAgentPage() {
       }
       
       source.start(0)
+      addDebug('AUDIO', `Playing MP3 audio (${audioBytes.length} bytes, ${audioBuffer.duration.toFixed(2)}s)`)
     } catch (error) {
       console.error('Error playing audio:', error)
       addDebug('AUDIO', `Playback error: ${error}`)
     }
-  }
-  
-  // Create WAV buffer
-  const createWAVBuffer = (pcmData: Uint8Array, sampleRate: number): ArrayBuffer => {
-    const length = pcmData.length
-    const buffer = new ArrayBuffer(44 + length)
-    const view = new DataView(buffer)
-    
-    const writeString = (offset: number, string: string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i))
-      }
-    }
-    
-    writeString(0, 'RIFF')
-    view.setUint32(4, 36 + length, true)
-    writeString(8, 'WAVE')
-    writeString(12, 'fmt ')
-    view.setUint32(16, 16, true)
-    view.setUint16(20, 1, true)
-    view.setUint16(22, 1, true)
-    view.setUint32(24, sampleRate, true)
-    view.setUint32(28, sampleRate * 2, true)
-    view.setUint16(32, 2, true)
-    view.setUint16(34, 16, true)
-    writeString(36, 'data')
-    view.setUint32(40, length, true)
-    
-    const pcmView = new Uint8Array(buffer, 44)
-    pcmView.set(pcmData)
-    
-    return buffer
   }
   
   // Start conversation
@@ -355,11 +320,18 @@ export default function VoiceAgentPage() {
       console.log('Got media stream, setting up audio processing...')
       setupAudioProcessing()
       
+      // Send configuration update to backend
+      console.log('Sending config update to server:', config)
+      wsRef.current?.send(JSON.stringify({ 
+        type: 'update_config', 
+        config: config 
+      }))
+      
       // Send start command
       console.log('Sending start_conversation command to server')
       wsRef.current?.send(JSON.stringify({ type: 'start_conversation' }))
       
-      addDebug('AUDIO', `Started audio capture at ${config.sample_rate}Hz`)
+      addDebug('AUDIO', `Started audio capture at ${config.sample_rate}Hz with ${config.elevenlabs_voice_id}`)
     } catch (error) {
       console.error('Failed to start conversation:', error)
       updateStatus('error', 'Failed to start')
@@ -463,6 +435,79 @@ export default function VoiceAgentPage() {
           </div>
         </div>
 
+        {/* Configuration */}
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 mb-6">
+          <h2 className="text-xl font-semibold mb-4">⚙️ Configuration</h2>
+          
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Microphone Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">🎤 Microphone</label>
+              <select
+                value={selectedMicrophone}
+                onChange={(e) => setSelectedMicrophone(e.target.value)}
+                disabled={isConversationActive}
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="">Select a microphone...</option>
+                {microphones.map((mic) => (
+                  <option key={mic.deviceId} value={mic.deviceId}>
+                    {mic.label || `Microphone ${mic.deviceId.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Voice Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">🗣️ ElevenLabs Voice</label>
+              <select
+                value={config.elevenlabs_voice_id}
+                onChange={(e) => setConfig({ ...config, elevenlabs_voice_id: e.target.value })}
+                disabled={isConversationActive}
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="pNInz6obpgDQGcFmaJgB">Adam (Male - Deep, Authoritative)</option>
+                <option value="yoZ06aMxZJJ28mfd3POQ">Sam (Male - Clear, Professional)</option>
+                <option value="cgSgspJ2msm6clMCkdW9">Eric (Male - Friendly, Warm)</option>
+                <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female - Calm, Clear)</option>
+                <option value="EXAVITQu4vr4xnSDxMaL">Bella (Female - Soft, Young)</option>
+                <option value="jsCqWAovK2LkecY7zXl4">Freya (Female - Expressive, Energetic)</option>
+              </select>
+            </div>
+            
+            {/* LLM Model */}
+            <div>
+              <label className="block text-sm font-medium mb-2">🤖 Language Model</label>
+              <select
+                value={config.llm_model}
+                onChange={(e) => setConfig({ ...config, llm_model: e.target.value })}
+                disabled={isConversationActive}
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="gpt-4o-mini">GPT-4o Mini (Fast & Affordable)</option>
+                <option value="gpt-4o">GPT-4o (Best Quality)</option>
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Legacy)</option>
+              </select>
+            </div>
+            
+            {/* Sample Rate */}
+            <div>
+              <label className="block text-sm font-medium mb-2">🎵 Sample Rate</label>
+              <select
+                value={config.sample_rate}
+                onChange={(e) => setConfig({ ...config, sample_rate: Number(e.target.value) })}
+                disabled={isConversationActive}
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="8000">8 kHz</option>
+                <option value="16000">16 kHz (Recommended)</option>
+                <option value="24000">24 kHz</option>
+                <option value="48000">48 kHz</option>
+              </select>
+            </div>
+          </div>
+        </div>
         
         {/* Controls */}
         <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 mb-6 text-center">
