@@ -199,7 +199,7 @@ async def connect_to_flux(session_id: str, websocket: WebSocket):
     }
     
     try:
-        async with websockets.connect(flux_url, extra_headers=headers) as flux_ws:
+        async with websockets.connect(flux_url, additional_headers=headers) as flux_ws:
             session['flux_ws'] = flux_ws
             logger.info(f"Session {session_id}: Connected to Flux")
             
@@ -406,6 +406,21 @@ async def voice_websocket(websocket: WebSocket):
             active_sessions[session_id]['conversation_active'] = False
             del active_sessions[session_id]
         logger.info(f"Session {session_id}: Cleaned up")
+
+
+@app.post("/webhook")
+async def webhook(request: dict):
+    """Simple webhook endpoint to receive data."""
+    logger.info(f"Webhook received: {request}")
+    
+    # You can add your webhook logic here
+    # For example, process the data, trigger actions, etc.
+    
+    return {
+        "status": "success",
+        "message": "Webhook received",
+        "received_data": request
+    }
 
 
 @app.get("/")
