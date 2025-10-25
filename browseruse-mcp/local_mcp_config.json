@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "local-browser-mcp": {
+      "command": "python",
+      "args": ["local_browser_mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "."
+      }
+    }
+  }
+}
