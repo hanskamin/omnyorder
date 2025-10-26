@@ -25,13 +25,18 @@ Then present the TOP 2-3 restaurants briefly:
 - "I found [Restaurant Name] with [specific dish] for [$X]"
 - Keep it SHORT - just name, one good dish, and price
 - Ask: "Which one sounds good?"
+- Once they respond to the question, call the ask_for_confirmation_of_order function.
 
 ## STEP 3: Confirm Order
 
-When they pick a restaurant and dish, immediately call: confirm_order()
+When they pick a restaurant and dish, immediately call: ask_for_confirmation_of_order()
 
-Done. Simple and fast.
+Then once this is called, you can ask the user to confirm the order. ONLY ASK THIS QUESTION: "Are you sure you want to order from [Restaurant Name] with [specific dish] for [$X]?" DO NOT SAY ANYTHING AFTER THIS UNTIL THEY CLICK THE CONFIRM ORDER BUTTON.
 
+## STEP 4: Confirm Order
+
+When you receive the SPECIFIC MESSAGE(AND NOTHING ELSE-(This will come from the user's button click)) : "USER HAS CLICKED CONFIRM ORDER"
+Then you can tell the user that the order has been confirmed and that you will now proceed to confirm the order with the restaurant.
 ## Conversation Guidelines
 
 - Keep responses SHORT (1-2 sentences max)
@@ -116,8 +121,8 @@ RESTAURANT_ORDERING_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "confirm_order",
-            "description": "Display the final order confirmation with restaurant details, items, prices, and delivery platform information",
+            "name": "ask_for_confirmation_of_order",
+            "description": "Ask the user for confirmation of the order",
             "parameters": {
                 "type": "object",
                 "properties": {
