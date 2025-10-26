@@ -297,7 +297,7 @@ CRITICAL: Only include restaurants that have at least ONE delivery platform avai
         return None
 
 
-def call_google_adk_agent(message: str, session_id: str) -> Optional[str]:
+async def call_google_adk_agent(message: str, session_id: str) -> Optional[str]:
     """
     Call Google ADK food ordering agent and extract voice agent response.
     
@@ -308,57 +308,84 @@ def call_google_adk_agent(message: str, session_id: str) -> Optional[str]:
     Returns:
         The voice agent's message text, or None if failed
     """
-    # try:
-    #     payload = {
-    #         "app_name": GOOGLE_ADK_APP_NAME,
-    #         "user_id": GOOGLE_ADK_USER_ID,
-    #         "session_id": session_id,
-    #         "new_message": {
-    #             "parts": [{"text": message}],
-    #             "role": "user"
-    #         },
-    #         "streaming": False
-    #     }
+    try:
+        logger.info(f"Calling Google ADK agent with message: {message} and session_id: {session_id}")
+        payload = {
+            "app_name": GOOGLE_ADK_APP_NAME,
+            "user_id": GOOGLE_ADK_USER_ID,
+            "session_id": session_id,
+            "new_message": {
+                "parts": [{"text": message}],
+                "role": "user"
+            },
+            "streaming": False
+        }
         
-    #     response = requests.post(
-    #         GOOGLE_ADK_ENDPOINT,
-    #         json=payload,
-    #         headers={"Content-Type": "application/json", "Accept": "application/json"},
-    #         timeout=120  # 2 minute timeout for order processing
-    #     )
+        response = requests.post(
+            GOOGLE_ADK_ENDPOINT,
+            json=payload,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=120  # 2 minute timeout for order processing
+        )
         
-    #     if response.status_code != 200:
-    #         logger.error(f"Google ADK request failed with status {response.status_code}")
-    #         return None
+        if response.status_code != 200:
+            logger.error(f"Google ADK request failed with status {response.status_code}")
+            return None
+        logger.info(f"Google ADK response: {response.json()}")
+        # Parse response and extract voice_agent_message
+        response_data = response.json()
         
-    #     # Parse response and extract voice_agent_message
-    #     response_data = response.json()
+        if isinstance(response_data, list):
+            for item in reversed(response_data):
+                if "actions" in item and "state_delta" in item["actions"]:
+                    state_delta = item["actions"]["state_delta"]
+                    if "api_execution_result" in state_delta:
+                        try:
+                            result_json = json.loads(
+                                state_delta["api_execution_result"]
+                                .replace("```json\n", "")
+                                .replace("\n```", "")
+                            )
+                            if "voice_agent_message" in result_json:
+                                return result_json["voice_agent_message"]
+                        except Exception as e:
+                            logger.error(f"Error parsing ADK response: {e}")
+                            continue
         
-    #     if isinstance(response_data, list):
-    #         for item in reversed(response_data):
-    #             if "actions" in item and "state_delta" in item["actions"]:
-    #                 state_delta = item["actions"]["state_delta"]
-    #                 if "api_execution_result" in state_delta:
-    #                     try:
-    #                         result_json = json.loads(
-    #                             state_delta["api_execution_result"]
-    #                             .replace("```json\n", "")
-    #                             .replace("\n```", "")
-    #                         )
-    #                         if "voice_agent_message" in result_json:
-    #                             return result_json["voice_agent_message"]
-    #                     except Exception as e:
-    #                         logger.error(f"Error parsing ADK response: {e}")
-    #                         continue
+        logger.warning("Could not extract voice agent message from Google ADK response")
+        return None
         
-    #     logger.warning("Could not extract voice agent message from Google ADK response")
-    #     return None
-        
-    # except Exception as e:
-    #     logger.error(f"Error calling Google ADK: {e}")
-    #     return None
-    return "Hi, I just placed your order have a great day!"
+    except Exception as e:
+        logger.error(f"Error calling Google ADK: {e}")
+        return None
 
+
+# Helper to create a Google ADK session and return its id
+def create_google_adk_session() -> Optional[str]:
+    try:
+        if not GOOGLE_ADK_APP_NAME or not GOOGLE_ADK_USER_ID:
+            logger.error("ADK_APP_NAME and ADK_USER_ID must be configured in environment")
+            return None
+        session_url = f"{GOOGLE_ADK_BASE_URL}/apps/{GOOGLE_ADK_APP_NAME}/users/{GOOGLE_ADK_USER_ID}/sessions"
+        payload = {
+            "app_name": GOOGLE_ADK_APP_NAME,
+            "user_id": GOOGLE_ADK_USER_ID,
+        }
+        logger.info(f"Creating Google ADK session at {session_url}")
+        response = requests.post(session_url, json=payload, headers={"Content-Type": "application/json", "Accept": "application/json"}, timeout=30)
+        if response.status_code in (200, 201):
+            data = response.json()
+            adk_session_id = data.get("id")
+            if adk_session_id:
+                logger.info(f"Created Google ADK session: {adk_session_id}")
+                return adk_session_id
+            logger.error("Google ADK session response missing 'id'")
+            return None
+        logger.error(f"Failed to create Google ADK session: {response.status_code} - {response.text}")
+        return None
+    except Exception as e:
+        logger.error(f"Error creating Google ADK session: {e}")
+        return None
 
 # Mock function handlers for restaurant ordering
 async def handle_store_dietary_preferences(preferences: str, websocket: WebSocket, session_id: str) -> dict:
@@ -950,40 +977,6 @@ async def voice_websocket(websocket: WebSocket):
                             'type': 'conversation_stopped',
                             'timestamp': datetime.now().isoformat()
                         })
-                    elif msg_type == 'confirmed_order':
-                        session['messages'].append({"role": "user", "content": "USER HAS CLICKED CONFIRM ORDER"})
-                        config = session['config']
-                        result = await generate_agent_reply(
-                                        session['messages'],
-                                        'USER HAS CLICKED CONFIRM ORDER',
-                                        session_id,
-                                        config,
-                                        websocket
-                                    )
-                        session['messages'].append({"role": "assistant", "content": result[0]})
-                                    
-                        if result:
-                            agent_text, audio_data, ui_update = result
-                            if ui_update:
-                                await websocket.send_json({
-                                    'type': 'ui_update',
-                                    'response': ui_update,
-                                    'timestamp': datetime.now().isoformat()
-                                })
-                            # Send text response
-                            await websocket.send_json({
-                                'type': 'agent_response',
-                                'response': agent_text,
-                                'timestamp': datetime.now().isoformat()
-                            })
-                            
-                            # Send audio
-                            if audio_data:
-                                await websocket.send_json({
-                                    'type': 'agent_speaking',
-                                    'audio': list(audio_data),
-                                    'timestamp': datetime.now().isoformat()
-                                })
                     
                     elif msg_type == 'update_config':
                         config_data = message.get('config', {})
@@ -991,76 +984,49 @@ async def voice_websocket(websocket: WebSocket):
                         logger.info(f"Session {session_id}: Config updated")
                     
                     elif msg_type == 'confirmed_order':
+                        logger.info(f"Session {session_id}: Confirmed order message received: {message}")
                         logger.info(f"Session {session_id}: Confirmed order message received")
                         session['messages'].append({"role": "user", "content": "USER HAS CLICKED CONFIRM ORDER"})
                         config = session['config']
 
-                        order_message = message.get('message', '')
-                        
-                        if not order_message:
+                        # Prefer 'message'; fallback to 'summary'
+                        order_message = message.get('message') or message.get('summary') or ''
+
+                        # Create a Google ADK session and use that session id (not our websocket id)
+                        adk_session_id = create_google_adk_session()
+                        if not adk_session_id:
                             await websocket.send_json({
                                 'type': 'error',
-                                'error': 'No message provided in confirmed_order'
+                                'error': 'Failed to create Google ADK session'
                             })
-                        else:
-                            result = await generate_agent_reply(
-                                        session['messages'],
-                                        'USER HAS CLICKED CONFIRM ORDER',
-                                        session_id,
-                                        config,
-                                        websocket
-                                    )
-                        session['messages'].append({"role": "assistant", "content": result[0]})
-                                    
-                        if result:
-                            agent_text, audio_data = result
-                            # Send text response
+                            continue
+
+                        # Call Google ADK agent using the ADK session id
+                        logger.info(f"Session {session_id}: Calling Google ADK agent with ADK session_id: {adk_session_id} and message: {order_message}")
+                        adk_response = await call_google_adk_agent(
+                            message=order_message,
+                            session_id=adk_session_id
+                        )
+                        
+                        if adk_response:
+                            # Send the voice agent's response
                             await websocket.send_json({
-                                'type': 'agent_response',
-                                'response': agent_text,
+                                'type': 'order_response',
+                                'response': adk_response,
                                 'timestamp': datetime.now().isoformat()
                             })
                             
-                            # Send audio
-                            if audio_data:
-                                await websocket.send_json({
-                                    'type': 'agent_speaking',
-                                    'audio': list(audio_data),
-                                    'timestamp': datetime.now().isoformat()
-                                })
-
-                            await asyncio.sleep(1)
-                            # Call Google ADK agent
-                            adk_response = call_google_adk_agent(
-                                message=order_message,
-                                session_id=str(session_id)
-                            )
+                            # Generate TTS for the response
+                            config = active_sessions[session_id]['config']
+                            tts_audio = await generate_tts_audio(adk_response, str(session_id), config)
                             
-                            if adk_response:
-                                # Send the voice agent's response
+                            if tts_audio:
                                 await websocket.send_json({
-                                    'type': 'order_response',
-                                    'response': adk_response,
+                                    'type': 'order_speaking',
+                                    'audio': list(tts_audio),
                                     'timestamp': datetime.now().isoformat()
                                 })
-                                
-                                # Generate TTS for the response
-                                config = active_sessions[session_id]['config']
-                                tts_audio = await generate_tts_audio(adk_response, str(session_id), config)
-                                
-                                if tts_audio:
-                                    await websocket.send_json({
-                                        'type': 'order_speaking',
-                                        'audio': list(tts_audio),
-                                        'timestamp': datetime.now().isoformat()
-                                    })
-                            else:
-                                await websocket.send_json({
-                                    'type': 'error',
-                                    'error': 'Failed to get response from ordering agent',
-                                    'timestamp': datetime.now().isoformat()
-                                })
-                
+                                    
                 # Handle binary messages (audio data)
                 elif 'bytes' in data:
                     session = active_sessions.get(session_id)
