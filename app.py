@@ -214,25 +214,24 @@ async def handle_confirm_order(restaurant_name: str, restaurant_address: str, re
     """Mock handler for confirming order"""
     logger.info(f"Session {session_id}: Confirming order at {restaurant_name}")
     
-    await websocket.send_json({
-        'type': 'function_call',
-        'function': 'confirm_order',
-        'status': 'executing',
-        'data': {
-            'restaurant_name': restaurant_name,
-            'restaurant_address': restaurant_address,
-            'items': items,
-            'total_price': total_price,
-            'delivery_platform': delivery_platform
-        },
-        'timestamp': datetime.now().isoformat()
-    })
+    # await websocket.send_json({
+    #     'type': 'function_call',
+    #     'function': 'confirm_order',
+    #     'status': 'executing',
+    #     'data': {
+    #         'restaurant_name': restaurant_name,
+    #         'restaurant_address': restaurant_address,
+    #         'items': items,
+    #         'total_price': total_price,
+    #         'delivery_platform': delivery_platform
+    #     },
+    #     'timestamp': datetime.now().isoformat()
+    # })
     
-    await asyncio.sleep(0.5)
+    # await asyncio.sleep(0.5)
     
     result = {
         'success': True,
-        'order_id': f'ORD-{datetime.now().strftime("%Y%m%d-%H%M%S")}',
         'restaurant': {
             'name': restaurant_name,
             'address': restaurant_address,
@@ -242,7 +241,8 @@ async def handle_confirm_order(restaurant_name: str, restaurant_address: str, re
         'items': items,
         'total_price': total_price,
         'delivery_platform': delivery_platform,
-        'estimated_delivery': '30-45 minutes'
+        'estimated_delivery': '30-45 minutes',
+        'order_summary': f'You have selected to order from {restaurant_name} for {total_price}.',
     }
     
     # Send UI update with order confirmation
@@ -289,11 +289,10 @@ async def generate_agent_reply(
         max_iterations = 10  # Prevent infinite loops
         iteration = 0
         ui_update = None
-        
+        print(f"final messages: {final_messages}")
         while iteration < max_iterations:
             iteration += 1
             logger.info(f"Session {session_id}: LLM call iteration {iteration}")
-            
             # Call OpenAI with function calling enabled
             response = openai_client.chat.completions.create(
                 model=config['llm_model'],
@@ -368,7 +367,7 @@ async def generate_agent_reply(
                     if function_result and 'restaurants' in function_result:
                         ui_update = {'restaurants': function_result['restaurants']}
                 
-                elif function_name == "confirm_order":
+                elif function_name == "ask_for_confirmation_of_order":
                     function_result = await handle_confirm_order(
                         restaurant_name=function_args.get("restaurant_name", ""),
                         restaurant_address=function_args.get("restaurant_address", ""),
@@ -522,6 +521,7 @@ async def connect_to_flux(session_id: str, websocket: WebSocket):
                                         config,
                                         websocket
                                     )
+                                    session['messages'].append({"role": "assistant", "content": result[0]})
                                     
                                     if result:
                                         agent_text, audio_data, ui_update = result
@@ -646,6 +646,40 @@ async def voice_websocket(websocket: WebSocket):
                             'type': 'conversation_stopped',
                             'timestamp': datetime.now().isoformat()
                         })
+                    elif msg_type == 'confirmed_order':
+                        session['messages'].append({"role": "user", "content": "USER HAS CLICKED CONFIRM ORDER"})
+                        config = session['config']
+                        result = await generate_agent_reply(
+                                        session['messages'],
+                                        'USER HAS CLICKED CONFIRM ORDER',
+                                        session_id,
+                                        config,
+                                        websocket
+                                    )
+                        session['messages'].append({"role": "assistant", "content": result[0]})
+                                    
+                        if result:
+                            agent_text, audio_data, ui_update = result
+                            if ui_update:
+                                await websocket.send_json({
+                                    'type': 'ui_update',
+                                    'response': ui_update,
+                                    'timestamp': datetime.now().isoformat()
+                                })
+                            # Send text response
+                            await websocket.send_json({
+                                'type': 'agent_response',
+                                'response': agent_text,
+                                'timestamp': datetime.now().isoformat()
+                            })
+                            
+                            # Send audio
+                            if audio_data:
+                                await websocket.send_json({
+                                    'type': 'agent_speaking',
+                                    'audio': list(audio_data),
+                                    'timestamp': datetime.now().isoformat()
+                                })
                     
                     elif msg_type == 'update_config':
                         config_data = message.get('config', {})

@@ -30,6 +30,9 @@ export default function VoiceAgentPage() {
   const [debugLog, setDebugLog] = useState<string[]>([])
   const [selectedMicrophone, setSelectedMicrophone] = useState<string>('')
   const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([])
+  const [showConfirmOrderButton, setShowConfirmOrderButton] = useState(false)
+  const [orderSummary, setOrderSummary] = useState('')
+  const [isConfirmingOrder, setIsConfirmingOrder] = useState(false)
   
   // Configuration
   const [config, setConfig] = useState<Config>({
@@ -126,6 +129,12 @@ export default function VoiceAgentPage() {
       addDebug('AUDIO', `Playback error: ${error}`)
     }
   }, [updateStatus, addDebug])
+  
+  const confirmOrder = (summary: string) => {
+    // setIsConfirmingOrder(true)
+    wsRef.current?.send(JSON.stringify({ type: 'confirmed_order', summary }))
+    console.log('Confirmed order', summary)
+  };
 
   // Handle WebSocket messages
   const handleWebSocketMessage = useCallback((data) => {
@@ -242,6 +251,21 @@ export default function VoiceAgentPage() {
               addDebug('AGENT', 'Failed to search restaurants');
             }
             break;
+           case 'confirm_order':
+             if (data.result && data.result.success) {
+               // display the order summary
+               // store the order summary for the confirm button
+               setOrderSummary(data.result.order_summary);
+               // display the confirm button
+               setShowConfirmOrderButton(true)
+               // TODO: replace with actual order confirmation.
+              //  setTimeout(() => {
+              //   setIsConfirmingOrder(false)
+              //  }, 3000);
+             } else {
+               addDebug('AGENT', 'Failed to confirm order');
+             }
+             break;
         }
         break
 
@@ -250,11 +274,11 @@ export default function VoiceAgentPage() {
         addDebug('APPROVAL', `${data.request}`)
         break
 
-      // case 'interim_transcript':
-      //   if (data.transcript) {
-      //     setInterimTranscript(data.transcript)
-      //   }
-      //   break
+      case 'interim_transcript':
+        if (data.transcript) {
+          setInterimTranscript(data.transcript)
+        }
+        break
 
       // case 'flux_event':
       //   addDebug('FLUX', `${data.data.type}`)
@@ -575,6 +599,21 @@ export default function VoiceAgentPage() {
             <div ref={messagesEndRef} />
           </div>
         </div>
+
+        {showConfirmOrderButton && (
+          <div className="mt-6">
+            <button
+              onClick={() => {
+                confirmOrder(orderSummary);
+                addMessage('system', 'ORDER SUBMITTED.')
+              }}
+              disabled={isConfirmingOrder}
+              className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-sky-400 disabled:cursor-not-allowed text-white font-semibold py-4 px-6 rounded-xl shadow-xl transition-all"
+            >
+              {isConfirmingOrder ? 'Confirming...' : 'Confirm Order'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
