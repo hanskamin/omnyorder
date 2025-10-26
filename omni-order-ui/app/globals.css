@@ -1,5 +1,45 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Space Grotesk";
+  src: url('/fonts/spacegrotesk/SpaceGrotesk-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url('/fonts/spacegrotesk/SpaceGrotesk-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url('/fonts/spacegrotesk/SpaceGrotesk-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url('/fonts/spacegrotesk/SpaceGrotesk-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url('/fonts/spacegrotesk/SpaceGrotesk-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -31,9 +71,17 @@ body {
   background: transparent;
 }
 
+/* Prevent the page from scrolling past the fixed map. Keep overlays scrollable via their own overflow. */
+#__next,
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Space Grotesk", Arial, Helvetica, sans-serif;
   margin: 0;
   padding-right: var(--map-controls-inset);
   padding-bottom: var(--map-controls-inset);
@@ -45,10 +93,13 @@ body {
   width: 100vw;
   height: 100vh;
   z-index: 0;
+  /* Allow the map to receive pointer and touch events (enable zoom/drag/clicks) */
+  pointer-events: auto;
+  touch-action: auto;
 }
 
 .content-on-map {
   position: relative;
   z-index: 1;
-  min-height: 100vh;
+  height: 100%;
 }
