@@ -15,6 +15,7 @@ from enum import Enum
 
 import openai
 import websockets
+import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from deepgram import (
@@ -25,6 +26,7 @@ from deepgram import (
 from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
+from pydantic import BaseModel
 from restaraunt_ordering_prompt import (
     RESTAURANT_ORDERING_SYSTEM_PROMPT,
     RESTAURANT_ORDERING_FUNCTIONS
@@ -41,6 +43,19 @@ DEEPGRAM_TTS_MODEL = "aura-2-phoebe-en"  # Kept for legacy compatibility
 ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam voice (default)
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Google ADK Configuration
+GOOGLE_ADK_BASE_URL = os.getenv("GOOGLE_ADK_BASE_URL", "http://a8a249feb5a8.ngrok-free.app")
+GOOGLE_ADK_ENDPOINT = f"{GOOGLE_ADK_BASE_URL}/run"
+GOOGLE_ADK_APP_NAME = os.getenv("ADK_APP_NAME")
+GOOGLE_ADK_USER_ID = os.getenv("ADK_USER_ID")
+
+# Google Maps API Configuration
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText"
+
+# OpenAI Client for restaurant search
+openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 elevenlabs = ElevenLabs(
@@ -90,9 +105,263 @@ class TTSEvent(Enum):
     FLUSHED = "flushed"
 
 
+# Pydantic models for structured restaurant output
+class MenuItem(BaseModel):
+    item: str
+    price: float
+
+
+class Restaurant(BaseModel):
+    name: str
+    address: str
+    lat: float
+    lng: float
+    cuisine: str
+    price_level: str
+    rating: Optional[float] = None
+    delivery_platforms: List[str]
+    menu_items: List[MenuItem]
+    reasoning: str
+
+
+class RestaurantRecommendations(BaseModel):
+    recommendations: List[Restaurant]
+    search_summary: str
+
+
+def search_restaurants_with_google_places(location: str, query: str) -> Optional[dict]:
+    """
+    Search for restaurants using Google Places API.
+    
+    Args:
+        location: Location dict with lat, lng, radius
+        query: Search query (e.g., "vegetarian restaurants")
+    
+    Returns:
+        Google Places API response data
+    """
+    if not GOOGLE_MAPS_API_KEY:
+        logger.error("GOOGLE_MAPS_API_KEY not configured")
+        return None
+    
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.priceLevel,places.rating,places.websiteUri,places.nationalPhoneNumber,places.types,places.userRatingCount"
+    }
+    
+    body = {
+        "textQuery": query,
+        "languageCode": "en"
+    }
+    
+    try:
+        response = requests.post(GOOGLE_PLACES_API_URL, headers=headers, json=body)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"Google Places API error: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error calling Google Places API: {e}")
+        return None
+
+
+def search_restaurants_with_web_search(
+    places_data: dict,
+    dietary_preferences: str,
+    budget: str,
+    cuisine_preference: str = "any"
+) -> Optional[RestaurantRecommendations]:
+    """
+    Use OpenAI with web search to find menu items and delivery availability.
+    """
+    # Extract restaurant names and basic info from Places API
+    restaurants_info = []
+    
+    if "places" in places_data:
+        for place in places_data["places"][:10]:  # Limit to top 10
+            name = place.get("displayName", {}).get("text", "Unknown")
+            location = place.get("location", {})
+            restaurant_data = {
+                "name": name,
+                "address": place.get("formattedAddress", ""),
+                "lat": location.get("latitude", 0.0),
+                "lng": location.get("longitude", 0.0),
+                "phone": place.get("nationalPhoneNumber", ""),
+                "website": place.get("websiteUri", ""),
+                "price_level": place.get("priceLevel", "PRICE_LEVEL_UNSPECIFIED"),
+                "rating": place.get("rating", 0)
+            }
+            restaurants_info.append(restaurant_data)
+    
+    # Create prompt for OpenAI
+    prompt = f"""I need you to research these restaurants and find out:
+1. What menu items they have that match these dietary preferences: {dietary_preferences}
+2. Whether they're available on Uber Eats, DoorDash, or Instacart
+3. Specific menu items with prices (if available)
+4. Why each restaurant is a good match
+
+CRITICAL REQUIREMENTS:
+- ONLY include restaurants that are available on at least ONE of these platforms: Uber Eats, DoorDash, or Instacart
+- If a restaurant is NOT available on any delivery platform, DO NOT include it in the recommendations
+- You must verify delivery availability through web search
+
+Dietary preferences: {dietary_preferences}
+Budget: {budget}
+Cuisine preference: {cuisine_preference}
+
+Restaurants to research:
+{json.dumps(restaurants_info, indent=2)}
+
+Use web search to find:
+1. Current menu information and prices
+2. Delivery platform availability (Uber Eats, DoorDash, Instacart)
+
+Remember: Only recommend restaurants available on at least one delivery platform AND that match the dietary preferences and budget.
+Be specific about menu items and prices you find."""
+
+    logger.info("Calling OpenAI with web search for restaurant research...")
+    
+    try:
+        # First, get the web search results using gpt-4o-search-preview
+        completion = openai_client.chat.completions.create(
+            model="gpt-4o-search-preview",
+            web_search_options={},
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful restaurant research assistant. Use web search to find accurate, current information about restaurants, their menus, prices, and delivery availability."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
+        
+        web_search_result = completion.choices[0].message.content
+        logger.info("Web search completed!")
+        
+        # Now use the web search results with structured output
+        formatting_prompt = f"""Based on this research, format the restaurant recommendations into the required structure.
+
+IMPORTANT: Use the EXACT data from the original Google Places information for these fields:
+- name, address, lat, lng, rating (use exact values from original data)
+- For price_level, convert Google's PRICE_LEVEL_* to symbols: INEXPENSIVE="$", MODERATE="$$", EXPENSIVE="$$$", VERY_EXPENSIVE="$$$$"
+- For menu_items, use format: {{"item": "name", "price": float}}
+- For delivery_platforms, create a list like ["Uber Eats", "DoorDash"] with only the platforms that are available
+- For reasoning, explain why this restaurant matches the user's dietary preferences and budget
+
+Original Google Places Data:
+{json.dumps(restaurants_info, indent=2)}
+
+Web Search Research Results:
+{web_search_result}
+
+CRITICAL: Only include restaurants that have at least ONE delivery platform available. If delivery_platforms list is empty, DO NOT include that restaurant."""
+
+        structured_completion = openai_client.beta.chat.completions.parse(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that formats restaurant information into structured JSON. Always preserve exact data from the original source when provided."
+                },
+                {
+                    "role": "user",
+                    "content": formatting_prompt
+                }
+            ],
+            response_format=RestaurantRecommendations
+        )
+        
+        result = structured_completion.choices[0].message.parsed
+        logger.info("Structured output generated!")
+        
+        # Filter out any restaurants without delivery platform availability (safety check)
+        filtered_recommendations = [
+            r for r in result.recommendations
+            if r.delivery_platforms and len(r.delivery_platforms) > 0
+        ]
+        
+        result.recommendations = filtered_recommendations
+        logger.info(f"Final count: {len(filtered_recommendations)} restaurants with delivery available")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in restaurant search with web search: {e}", exc_info=True)
+        return None
+
+
+def call_google_adk_agent(message: str, session_id: str) -> Optional[str]:
+    """
+    Call Google ADK food ordering agent and extract voice agent response.
+    
+    Args:
+        message: The user's message text
+        session_id: Session ID for maintaining conversation context
+    
+    Returns:
+        The voice agent's message text, or None if failed
+    """
+    # try:
+    #     payload = {
+    #         "app_name": GOOGLE_ADK_APP_NAME,
+    #         "user_id": GOOGLE_ADK_USER_ID,
+    #         "session_id": session_id,
+    #         "new_message": {
+    #             "parts": [{"text": message}],
+    #             "role": "user"
+    #         },
+    #         "streaming": False
+    #     }
+        
+    #     response = requests.post(
+    #         GOOGLE_ADK_ENDPOINT,
+    #         json=payload,
+    #         headers={"Content-Type": "application/json", "Accept": "application/json"},
+    #         timeout=120  # 2 minute timeout for order processing
+    #     )
+        
+    #     if response.status_code != 200:
+    #         logger.error(f"Google ADK request failed with status {response.status_code}")
+    #         return None
+        
+    #     # Parse response and extract voice_agent_message
+    #     response_data = response.json()
+        
+    #     if isinstance(response_data, list):
+    #         for item in reversed(response_data):
+    #             if "actions" in item and "state_delta" in item["actions"]:
+    #                 state_delta = item["actions"]["state_delta"]
+    #                 if "api_execution_result" in state_delta:
+    #                     try:
+    #                         result_json = json.loads(
+    #                             state_delta["api_execution_result"]
+    #                             .replace("```json\n", "")
+    #                             .replace("\n```", "")
+    #                         )
+    #                         if "voice_agent_message" in result_json:
+    #                             return result_json["voice_agent_message"]
+    #                     except Exception as e:
+    #                         logger.error(f"Error parsing ADK response: {e}")
+    #                         continue
+        
+    #     logger.warning("Could not extract voice agent message from Google ADK response")
+    #     return None
+        
+    # except Exception as e:
+    #     logger.error(f"Error calling Google ADK: {e}")
+    #     return None
+    return "Hi, I just placed your order have a great day!"
+
+
 # Mock function handlers for restaurant ordering
 async def handle_store_dietary_preferences(preferences: str, websocket: WebSocket, session_id: str) -> dict:
-    """Mock handler for storing dietary preferences"""
     logger.info(f"Session {session_id}: Storing dietary preferences: {preferences}")
     
     # Mock response
@@ -109,6 +378,8 @@ async def handle_store_dietary_preferences(preferences: str, websocket: WebSocke
         'result': result,
         'timestamp': datetime.now().isoformat()
     })
+
+    await asyncio.sleep(0)
     
     return result
 
@@ -130,105 +401,144 @@ async def handle_store_budget_info(budget: str, websocket: WebSocket, session_id
         'result': result,
         'timestamp': datetime.now().isoformat()
     })
+    await asyncio.sleep(0)
     
     return result
 
 
 async def handle_search_restaurants(dietary_preferences: str, budget: str, order_summary: str, websocket: WebSocket, session_id: str) -> dict:
-    """Mock handler for searching restaurants"""
+    """Real handler for searching restaurants using Google Places + OpenAI web search"""
     logger.info(f"Session {session_id}: Searching restaurants - Dietary: {dietary_preferences}, Budget: {budget}, Order: {order_summary}")
     
-
-    await asyncio.sleep(1.0)
     
-    # Mock restaurant data
-    mock_restaurants = [
-        {
-            'name': 'Veracruz All Natural',
-            'address': '1108 E 6th St, Austin, TX 78702',
-            'lat': 30.2656,
-            'lng': -97.7332,
-            'cuisine': 'Mexican',
-            'price_level': '$$',
-            'rating': 4.5,
-            'delivery_platforms': ['Uber Eats', 'DoorDash'],
-            'menu_items': [
-                {'item': 'Migas Breakfast Taco', 'price': 4.50},
-                {'item': 'Refried Bean & Cheese Taco', 'price': 3.75},
-                {'item': 'Fresh Guacamole', 'price': 8.00}
-            ],
-            'reasoning': 'This restaurant is a good option because it is a Mexican restaurant and it is in the area.'
-        },
-        {
-            'name': 'Bouldin Creek Cafe',
-            'address': '1900 S 1st St, Austin, TX 78704',
-            'lat': 30.2502,
-            'lng': -97.7558,
-            'cuisine': 'American, Vegetarian',
-            'price_level': '$$',
-            'rating': 4.3,
-            'delivery_platforms': ['DoorDash'],
-            'menu_items': [
-                {'item': 'Veggie Burger', 'price': 12.00},
-                {'item': 'Tofu Scramble', 'price': 11.50},
-                {'item': 'House Salad', 'price': 9.00}
-            ],
-            'reasoning': 'This restaurant is a good option because it is a vegetarian restaurant and it is in the area.'
-        },
-        {
-            'name': 'Arpeggio Grill',
-            'address': '301 W Oltorf St, Austin, TX 78704',
-            'lat': 30.2491,
-            'lng': -97.7518,
-            'cuisine': 'Mediterranean',
-            'price_level': '$$',
-            'rating': 4.7,
-            'delivery_platforms': ['Uber Eats', 'DoorDash'],
-            'menu_items': [
-                {'item': 'Falafel Wrap', 'price': 10.00},
-                {'item': 'Greek Salad', 'price': 9.50},
-                {'item': 'Hummus Platter', 'price': 8.50}
-            ],
-            'reasoning': 'This restaurant is a good option because it is a Mediterranean restaurant and it is in the area.'
+    try:
+        # Step 1: Search Google Places API
+        # Default to Austin, TX location - in production, should get user's location
+        await websocket.send_json({
+            'type': 'system_response',
+            'response': f'Searching restaurants with query: {order_summary}',
+            'timestamp': datetime.now().isoformat()
+        })
+        await asyncio.sleep(0.3)
+        places_data = search_restaurants_with_google_places(location="Austin, TX", query=order_summary)
+        restaurants_info = []
+        for place in places_data["places"][:10]:  # Limit to top 10
+            name = place.get("displayName", {}).get("text", "Unknown")
+            location = place.get("location", {})
+            restaurant_data = {
+                "name": name,
+                "address": place.get("formattedAddress", ""),
+                "lat": location.get("latitude", 0.0),
+                "lng": location.get("longitude", 0.0),
+                "phone": place.get("nationalPhoneNumber", ""),
+                "website": place.get("websiteUri", ""),
+                "price_level": place.get("priceLevel", "PRICE_LEVEL_UNSPECIFIED"),
+                "rating": place.get("rating", 0)
+            }
+            restaurants_info.append(restaurant_data)
+        result = {
+            'success': True,
+            'restaurants': restaurants_info,
+            'count': len(places_data),
+            'summary': 'Restaurants found in your area'
         }
-    ]
-    
-    result = {
-        'success': True,
-        'restaurants': mock_restaurants,
-        'count': len(mock_restaurants)
-    }
-    
-    await websocket.send_json({
-        'type': 'function_call',
-        'function': 'search_restaurants',
-        'status': 'completed',
-        'result': result,
-        'timestamp': datetime.now().isoformat()
-    })
-    
-    return result
+        await websocket.send_json({
+            'type': 'function_call',
+            'function': 'search_restaurants',
+            'status': 'completed',
+            'result': result,
+            'timestamp': datetime.now().isoformat()
+        })
+        await asyncio.sleep(0.3)
+        if not places_data or "places" not in places_data:
+            logger.error("No places found from Google Places API")
+            result = {
+                'success': False,
+                'error': 'No restaurants found in your area',
+                'restaurants': [],
+                'count': 0
+            }
+        else:
+            # Step 2: Use OpenAI web search to research menus and delivery
+            recommendations = search_restaurants_with_web_search(
+                places_data=places_data,
+                dietary_preferences=dietary_preferences,
+                budget=budget,
+                cuisine_preference=order_summary
+            )
+
+            
+            
+            if recommendations and recommendations.recommendations:
+                # Convert Pydantic models to dicts for JSON serialization
+                restaurants = [r.model_dump() for r in recommendations.recommendations]
+                
+                result = {
+                    'success': True,
+                    'restaurants': restaurants,
+                    'count': len(restaurants),
+                    'summary': recommendations.search_summary
+                }
+            else:
+                logger.warning("No restaurants matched criteria after web search")
+                result = {
+                    'success': False,
+                    'error': 'No restaurants found matching your preferences with delivery available',
+                    'restaurants': [],
+                    'count': 0
+                }
+        
+        await websocket.send_json({
+            'type': 'function_call',
+            'function': 'pick_restaurants',
+            'status': 'completed',
+            'result': result,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in handle_search_restaurants: {e}", exc_info=True)
+        result = {
+            'success': False,
+            'error': str(e),
+            'restaurants': [],
+            'count': 0
+        }
+        
+        await websocket.send_json({
+            'type': 'function_call',
+            'function': 'search_restaurants',
+            'status': 'error',
+            'result': result,
+            'timestamp': datetime.now().isoformat()
+        })
+
+        await asyncio.sleep(0)
+        
+        return result
 
 
-async def handle_confirm_order(restaurant_name: str, restaurant_address: str, restaraunt_lat: float, restaraunt_lng: float, items: list, total_price: float, delivery_platform: str, websocket: WebSocket, session_id: str) -> dict:
+async def handle_confirm_order(restaurant_name: str, restaurant_address: str, restaraunt_lat: float, restaraunt_lng: float, items: list, total_price: float, delivery_platform: str, order_summary: str, websocket: WebSocket, session_id: str) -> dict:
     """Mock handler for confirming order"""
     logger.info(f"Session {session_id}: Confirming order at {restaurant_name}")
     
-    # await websocket.send_json({
-    #     'type': 'function_call',
-    #     'function': 'confirm_order',
-    #     'status': 'executing',
-    #     'data': {
-    #         'restaurant_name': restaurant_name,
-    #         'restaurant_address': restaurant_address,
-    #         'items': items,
-    #         'total_price': total_price,
-    #         'delivery_platform': delivery_platform
-    #     },
-    #     'timestamp': datetime.now().isoformat()
-    # })
+    await websocket.send_json({
+        'type': 'function_call',
+        'function': 'confirm_order',
+        'status': 'executing',
+        'data': {
+            'restaurant_name': restaurant_name,
+            'restaurant_address': restaurant_address,
+            'items': items,
+            'total_price': total_price,
+            'delivery_platform': delivery_platform,
+            'order_summary': order_summary
+        },
+        'timestamp': datetime.now().isoformat()
+    })
     
-    # await asyncio.sleep(0.5)
     
     result = {
         'success': True,
@@ -236,23 +546,15 @@ async def handle_confirm_order(restaurant_name: str, restaurant_address: str, re
             'name': restaurant_name,
             'address': restaurant_address,
             'lat': restaraunt_lat,
-            'lng': restaraunt_lng
+            'lng': restaraunt_lng,
+            'order_summary': order_summary
         },
         'items': items,
         'total_price': total_price,
         'delivery_platform': delivery_platform,
         'estimated_delivery': '30-45 minutes',
-        'order_summary': f'You have selected to order from {restaurant_name} for {total_price}.',
+        'order_summary': order_summary
     }
-    
-    # Send UI update with order confirmation
-    await websocket.send_json({
-        'type': 'ui_update',
-        'response': {
-            'order_confirmation': result
-        },
-        'timestamp': datetime.now().isoformat()
-    })
     
     await websocket.send_json({
         'type': 'function_call',
@@ -261,6 +563,7 @@ async def handle_confirm_order(restaurant_name: str, restaurant_address: str, re
         'result': result,
         'timestamp': datetime.now().isoformat()
     })
+    await asyncio.sleep(0)
     
     return result
 
@@ -297,8 +600,7 @@ async def generate_agent_reply(
             response = openai_client.chat.completions.create(
                 model=config['llm_model'],
                 messages=final_messages,
-                temperature=0.7,
-                max_tokens=500,
+                temperature=0.3,
                 tools=RESTAURANT_ORDERING_FUNCTIONS,
                 tool_choice="auto"
             )
@@ -377,7 +679,8 @@ async def generate_agent_reply(
                         total_price=function_args.get("total_price", 0.0),
                         delivery_platform=function_args.get("delivery_platform", ""),
                         websocket=websocket,
-                        session_id=session_id
+                        session_id=session_id,
+                        order_summary=function_args.get("order_summary", "")
                     )
                 
                 # Add function result to messages
@@ -386,6 +689,7 @@ async def generate_agent_reply(
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(function_result)
                 })
+                session = active_sessions[session_id]
         
         logger.warning(f"Session {session_id}: Max iterations reached")
         return "I apologize, but I'm having trouble processing your request. Let's start over.", None, None
@@ -685,6 +989,77 @@ async def voice_websocket(websocket: WebSocket):
                         config_data = message.get('config', {})
                         active_sessions[session_id]['config'].update(config_data)
                         logger.info(f"Session {session_id}: Config updated")
+                    
+                    elif msg_type == 'confirmed_order':
+                        logger.info(f"Session {session_id}: Confirmed order message received")
+                        session['messages'].append({"role": "user", "content": "USER HAS CLICKED CONFIRM ORDER"})
+                        config = session['config']
+
+                        order_message = message.get('message', '')
+                        
+                        if not order_message:
+                            await websocket.send_json({
+                                'type': 'error',
+                                'error': 'No message provided in confirmed_order'
+                            })
+                        else:
+                            result = await generate_agent_reply(
+                                        session['messages'],
+                                        'USER HAS CLICKED CONFIRM ORDER',
+                                        session_id,
+                                        config,
+                                        websocket
+                                    )
+                        session['messages'].append({"role": "assistant", "content": result[0]})
+                                    
+                        if result:
+                            agent_text, audio_data = result
+                            # Send text response
+                            await websocket.send_json({
+                                'type': 'agent_response',
+                                'response': agent_text,
+                                'timestamp': datetime.now().isoformat()
+                            })
+                            
+                            # Send audio
+                            if audio_data:
+                                await websocket.send_json({
+                                    'type': 'agent_speaking',
+                                    'audio': list(audio_data),
+                                    'timestamp': datetime.now().isoformat()
+                                })
+
+                            await asyncio.sleep(1)
+                            # Call Google ADK agent
+                            adk_response = call_google_adk_agent(
+                                message=order_message,
+                                session_id=str(session_id)
+                            )
+                            
+                            if adk_response:
+                                # Send the voice agent's response
+                                await websocket.send_json({
+                                    'type': 'order_response',
+                                    'response': adk_response,
+                                    'timestamp': datetime.now().isoformat()
+                                })
+                                
+                                # Generate TTS for the response
+                                config = active_sessions[session_id]['config']
+                                tts_audio = await generate_tts_audio(adk_response, str(session_id), config)
+                                
+                                if tts_audio:
+                                    await websocket.send_json({
+                                        'type': 'order_speaking',
+                                        'audio': list(tts_audio),
+                                        'timestamp': datetime.now().isoformat()
+                                    })
+                            else:
+                                await websocket.send_json({
+                                    'type': 'error',
+                                    'error': 'Failed to get response from ordering agent',
+                                    'timestamp': datetime.now().isoformat()
+                                })
                 
                 # Handle binary messages (audio data)
                 elif 'bytes' in data:
@@ -711,19 +1086,6 @@ async def voice_websocket(websocket: WebSocket):
         logger.info(f"Session {session_id}: Cleaned up")
 
 
-@app.post("/webhook")
-async def webhook(request: dict):
-    """Simple webhook endpoint to receive data."""
-    logger.info(f"Webhook received: {request}")
-    
-    # You can add your webhook logic here
-    # For example, process the data, trigger actions, etc.
-    
-    return {
-        "status": "success",
-        "message": "Webhook received",
-        "received_data": request
-    }
 
 
 @app.get("/")

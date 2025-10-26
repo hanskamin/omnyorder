@@ -137,7 +137,7 @@ export default function VoiceAgentPage() {
   };
 
   // Handle WebSocket messages
-  const handleWebSocketMessage = useCallback((data) => {
+  const handleWebSocketMessage = useCallback(async ( data) => {
     const { type } = data
 
     switch (type) {
@@ -177,7 +177,14 @@ export default function VoiceAgentPage() {
 
       case 'agent_response':
         addMessage('agent', data.response)
+        console.log('Agent response:', data.response)
         addDebug('AGENT', `"${data.response}"`)
+        break
+
+      case 'system_response':
+        addMessage('system', data.response)
+        console.log('System response:', data.response)
+        addDebug('SYSTEM', `"${data.response}"`)
         break
 
       case 'agent_speaking':
@@ -215,7 +222,93 @@ export default function VoiceAgentPage() {
               console.log('Restaurants:', restaurants);
               for (const restaurant of restaurants) {
                 const priceDisplay = restaurant.price_level || 'Price not available'
+
+                const infoWindowContent = `
+                  <style>
+                    .gm-style-iw button,
+                    .gm-style-iw button[title="Close"],
+                    .gm-style-iw-d button,
+                    button.gm-ui-hover-effect,
+                    .gm-style-iw button.gm-ui-hover-effect { display: none !important; }
+                    .gm-style-iw-t::after,
+                    .gm-style-iw-t::before { display: none !important; }
+                  </style>
+                  <div style="max-width: 280px; font-family: 'Space Grotesk', Arial, sans-serif; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px); border-radius: 12px; padding: 16px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); border: 1px solid rgba(148, 163, 184, 0.2);">
+                    <h3 style="margin: 0 0 12px 0; color: #334155; font-size: 16px; font-weight: 600; line-height: 1.3;">${restaurant.name}</h3>
+                    <p style="margin: 0 0 8px 0; color: #64748b; font-size: 14px; font-weight: 500;"><strong style="color: #475569;">Price:</strong> ${priceDisplay}</p>
+                  </div>
+                `
+
+                addMarker({
+                  id: `restaurant-${restaurant.name}`,
+                  position: {
+                    lat: restaurant.lat,
+                    lng: restaurant.lng
+                  },
+                  options: {
+                    animation: google.maps.Animation.DROP,
+                    title: `${restaurant.name} - ${priceDisplay}`, // Enhanced hover tooltip
+                  },
+                  infoWindowContent: infoWindowContent.trim()
+                })
+              }
+            } else {
+              addDebug('AGENT', 'Failed to search restaurants');
+            }
+            break;
+          case 'pick_restaurants':
+            if (data.result && data.result.success) {
+              const restaurants = data.result.restaurants;
+              console.log('Restaurants:', restaurants);
+              for (const restaurant of restaurants) {
+                const priceDisplay = restaurant.price_level || 'Price not available'
                 const reasoning = restaurant.reasoning || 'Recommended restaurant'
+                
+                // Check delivery platforms
+                const deliveryPlatforms = restaurant.delivery_platforms || [];
+                const platformsLower = deliveryPlatforms.map((p: string) => p.toLowerCase());
+                
+                const hasUberEats = platformsLower.some((p: string) => p.includes('uber'));
+                const hasDoorDash = platformsLower.some((p: string) => p.includes('doordash'));
+                const hasInstacart = platformsLower.some((p: string) => p.includes('instacart'));
+                
+                // Platform logo URLs mapping
+                const platformLogoUrls: Record<string, string> = {
+                  'uber': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTmT0Dx-4WB8c13Vn9ay1qbbhtFuQOjzbyG6Q&s',
+                  'doordash': 'https://play-lh.googleusercontent.com/ISmECE96NXztm4hdjoRcyU4AbtJyDRFXdcQJTCoh4X5fRyn7A6M_dB4sWSOQl4Hjaqzq',
+                  'instacart': 'data:image/png;base64,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'
+                };
+                
+                // Get the first platform's logo URL for marker icon
+                let markerIconUrl = '';
+                if (deliveryPlatforms.length > 0) {
+                  const firstPlatform = platformsLower[0];
+                  if (firstPlatform.includes('uber')) {
+                    markerIconUrl = platformLogoUrls['uber'];
+                  } else if (firstPlatform.includes('doordash')) {
+                    markerIconUrl = platformLogoUrls['doordash'];
+                  } else if (firstPlatform.includes('instacart')) {
+                    markerIconUrl = platformLogoUrls['instacart'];
+                  }
+                }
+                
+                // Build delivery platform logos HTML
+                let platformLogosHtml = '';
+                if (hasUberEats || hasDoorDash || hasInstacart) {
+                  platformLogosHtml = '<div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">';
+                  
+                  if (hasUberEats) {
+                    platformLogosHtml += `<img src="${platformLogoUrls['uber']}" alt="Uber Eats" style="height: 24px; object-fit: contain;" />`;
+                  }
+                  if (hasDoorDash) {
+                    platformLogosHtml += `<img src="${platformLogoUrls['doordash']}" alt="DoorDash" style="height: 24px; object-fit: contain;" />`;
+                  }
+                  if (hasInstacart) {
+                    platformLogosHtml += `<img src="data:image/png;base64,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" alt="Instacart" style="height: 24px; object-fit: contain;" />`;
+                  }
+                  
+                  platformLogosHtml += '</div>';
+                }
 
                 const infoWindowContent = `
                   <style>
@@ -231,8 +324,23 @@ export default function VoiceAgentPage() {
                     <h3 style="margin: 0 0 12px 0; color: #334155; font-size: 16px; font-weight: 600; line-height: 1.3;">${restaurant.name}</h3>
                     <p style="margin: 0 0 8px 0; color: #64748b; font-size: 14px; font-weight: 500;"><strong style="color: #475569;">Price:</strong> ${priceDisplay}</p>
                     <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.4;">${reasoning}</p>
+                    ${platformLogosHtml}
                   </div>
                 `
+
+                // Configure marker icon - use first platform logo or fallback to circle
+                const markerIcon = markerIconUrl ? {
+                  url: markerIconUrl,
+                  scaledSize: new google.maps.Size(32, 32),
+                  anchor: new google.maps.Point(16, 16),
+                } : {
+                  path: google.maps.SymbolPath.CIRCLE,
+                  scale: 10,
+                  fillColor: '#00FF00',
+                  fillOpacity: 1,
+                  strokeColor: '#006400',
+                  strokeWeight: 2,
+                };
 
                 addMarker({
                   id: `restaurant-${restaurant.name}`,
@@ -241,8 +349,9 @@ export default function VoiceAgentPage() {
                     lng: restaurant.lng
                   },
                   options: {
-                    animation: google.maps.Animation.DROP,
+                    animation: google.maps.Animation.BOUNCE,
                     title: `${restaurant.name} - ${priceDisplay}`, // Enhanced hover tooltip
+                    icon: markerIcon,
                   },
                   infoWindowContent: infoWindowContent.trim()
                 })
@@ -317,7 +426,12 @@ export default function VoiceAgentPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        handleWebSocketMessage(data)
+        if (data.type != 'flux_event' &&data.type != 'interim_transcript' && data.type != 'agent_speaking')
+          console.log("I'm gettting a message" + JSON.stringify(data))
+        handleWebSocketMessage(data).catch(error => {
+          console.error('Error handling message:', error);
+          addDebug('ERROR', `Message handling failed: ${error.message}`);
+        });
       } catch (error) {
         console.error('Error parsing message:', error)
       }

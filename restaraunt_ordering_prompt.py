@@ -172,9 +172,13 @@ RESTAURANT_ORDERING_FUNCTIONS = [
                         "type": "string",
                         "description": "Which platform to order from",
                         "enum": ["Uber Eats", "DoorDash", "Instacart"]
+                    },
+                    "order_summary": {
+                        "type": "string",
+                        "description": "A summary of what the user wants to order, written from the user's perspective - 'I want to order a burger and fries please.'"
                     }
                 },
-                "required": ["restaurant_name", "restaurant_address", "restaraunt_lat", "restaraunt_lng", "items", "total_price", "delivery_platform"]
+                "required": ["restaurant_name", "restaurant_address", "restaraunt_lat", "restaraunt_lng", "items", "total_price", "delivery_platform", "order_summary"]
             }
         }
     }
