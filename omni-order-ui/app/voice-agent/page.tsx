@@ -49,8 +49,8 @@ export default function VoiceAgentPage() {
   const isPlayingRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   
-  // Map markers hook (demo marker)
-  const { ready: mapReady, addMarker, getMap } = useMapMarkers()
+  // Map markers hook
+  const { addMarker } = useMapMarkers()
   
   // Add debug message
   const addDebug = useCallback((category: string, message: string) => {
@@ -181,8 +181,68 @@ export default function VoiceAgentPage() {
         break
 
       case 'function_call':
-        const functionCall = data.function_call;
+        const functionCall: string = data.function;
         console.log('Function call:', functionCall)
+        switch (functionCall) {
+          case 'store_dietary_preferences':
+            if (data.result && data.result.success) {
+              const preferences: string = data.result.preferences;
+              addMessage('system', `Preference saved: ${preferences}`);
+            } else {
+              addDebug('AGENT', 'Failed to store dietary preferences');
+            }
+            break;
+          case 'store_budget_info':
+            if (data.result && data.result.success) {
+              const budget: string = data.result.budget;
+              addMessage('system', `Budget noted: ${budget}`);
+            } else {
+              addDebug('AGENT', 'Failed to store budget info');
+            }
+            break;
+          case 'search_restaurants':
+            if (data.result && data.result.success) {
+              const restaurants = data.result.restaurants;
+              console.log('Restaurants:', restaurants);
+              for (const restaurant of restaurants) {
+                const priceDisplay = restaurant.price_level || 'Price not available'
+                const reasoning = restaurant.reasoning || 'Recommended restaurant'
+
+                const infoWindowContent = `
+                  <style>
+                    .gm-style-iw button,
+                    .gm-style-iw button[title="Close"],
+                    .gm-style-iw-d button,
+                    button.gm-ui-hover-effect,
+                    .gm-style-iw button.gm-ui-hover-effect { display: none !important; }
+                    .gm-style-iw-t::after,
+                    .gm-style-iw-t::before { display: none !important; }
+                  </style>
+                  <div style="max-width: 280px; font-family: 'Space Grotesk', Arial, sans-serif; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px); border-radius: 12px; padding: 16px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); border: 1px solid rgba(148, 163, 184, 0.2);">
+                    <h3 style="margin: 0 0 12px 0; color: #334155; font-size: 16px; font-weight: 600; line-height: 1.3;">${restaurant.name}</h3>
+                    <p style="margin: 0 0 8px 0; color: #64748b; font-size: 14px; font-weight: 500;"><strong style="color: #475569;">Price:</strong> ${priceDisplay}</p>
+                    <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.4;">${reasoning}</p>
+                  </div>
+                `
+
+                addMarker({
+                  id: `restaurant-${restaurant.name}`,
+                  position: {
+                    lat: restaurant.lat,
+                    lng: restaurant.lng
+                  },
+                  options: {
+                    animation: google.maps.Animation.DROP,
+                    title: `${restaurant.name} - ${priceDisplay}`, // Enhanced hover tooltip
+                  },
+                  infoWindowContent: infoWindowContent.trim()
+                })
+              }
+            } else {
+              addDebug('AGENT', 'Failed to search restaurants');
+            }
+            break;
+        }
         break
 
       case 'approval_request':
@@ -190,22 +250,22 @@ export default function VoiceAgentPage() {
         addDebug('APPROVAL', `${data.request}`)
         break
 
-      case 'interim_transcript':
-        if (data.transcript) {
-          setInterimTranscript(data.transcript)
-        }
-        break
+      // case 'interim_transcript':
+      //   if (data.transcript) {
+      //     setInterimTranscript(data.transcript)
+      //   }
+      //   break
 
-      case 'flux_event':
-        addDebug('FLUX', `${data.data.type}`)
-        break
+      // case 'flux_event':
+      //   addDebug('FLUX', `${data.data.type}`)
+      //   break
 
       case 'error':
         updateStatus('error', `Error: ${data.error}`)
         addDebug('ERROR', data.error)
         break
     }
-  }, [updateStatus, addMessage, addDebug, playAudio])
+  }, [updateStatus, addMessage, addDebug, playAudio, addMarker])
 
   // Initialize WebSocket
   const initWebSocket = useCallback(() => {
@@ -233,7 +293,6 @@ export default function VoiceAgentPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        console.log('Received WebSocket message:', data)
         handleWebSocketMessage(data)
       } catch (error) {
         console.error('Error parsing message:', error)
@@ -502,7 +561,7 @@ export default function VoiceAgentPage() {
                     ? 'border-emerald-200 bg-emerald-50/90 text-emerald-900 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-white'
                     : msg.type === 'agent'
                     ? 'border-sky-200 bg-sky-50/90 text-sky-900 dark:border-sky-400/40 dark:bg-sky-500/15 dark:text-white'
-                    : 'border-slate-200 bg-slate-50/90 text-slate-700 dark:border-slate-500/40 dark:bg-slate-500/20 dark:text-white'
+                    : 'border-amber-200 bg-amber-50/90 text-amber-900 dark:border-amber-400/40 dark:bg-amber-500/15 dark:text-white'
                 }`}
               >
                 <div className="text-xs font-medium text-slate-500 dark:text-slate-300 mb-1">
