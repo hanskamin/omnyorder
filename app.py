@@ -156,7 +156,8 @@ async def handle_search_restaurants(dietary_preferences: str, budget: str, order
                 {'item': 'Migas Breakfast Taco', 'price': 4.50},
                 {'item': 'Refried Bean & Cheese Taco', 'price': 3.75},
                 {'item': 'Fresh Guacamole', 'price': 8.00}
-            ]
+            ],
+            'reasoning': 'This restaurant is a good option because it is a Mexican restaurant and it is in the area.'
         },
         {
             'name': 'Bouldin Creek Cafe',
@@ -171,7 +172,8 @@ async def handle_search_restaurants(dietary_preferences: str, budget: str, order
                 {'item': 'Veggie Burger', 'price': 12.00},
                 {'item': 'Tofu Scramble', 'price': 11.50},
                 {'item': 'House Salad', 'price': 9.00}
-            ]
+            ],
+            'reasoning': 'This restaurant is a good option because it is a vegetarian restaurant and it is in the area.'
         },
         {
             'name': 'Arpeggio Grill',
@@ -186,7 +188,8 @@ async def handle_search_restaurants(dietary_preferences: str, budget: str, order
                 {'item': 'Falafel Wrap', 'price': 10.00},
                 {'item': 'Greek Salad', 'price': 9.50},
                 {'item': 'Hummus Platter', 'price': 8.50}
-            ]
+            ],
+            'reasoning': 'This restaurant is a good option because it is a Mediterranean restaurant and it is in the area.'
         }
     ]
     
