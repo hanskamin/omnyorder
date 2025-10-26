@@ -417,105 +417,29 @@ export default function VoiceAgentPage() {
   }
   
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-4 md:p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">
-            Omni Order Voice Agent
-          </h1>
-          <p className="text-gray-300 text-lg">
-            Real-time voice conversations powered by Omni Order
-          </p>
-          
-          {/* Status */}
-          <div className="mt-4 flex items-center justify-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
-            <span className="font-medium">{statusText}</span>
-          </div>
-        </div>
-
-        {/* Configuration */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 mb-6">
-          <h2 className="text-xl font-semibold mb-4">⚙️ Configuration</h2>
-          
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Microphone Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-2">🎤 Microphone</label>
-              <select
-                value={selectedMicrophone}
-                onChange={(e) => setSelectedMicrophone(e.target.value)}
-                disabled={isConversationActive}
-                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select a microphone...</option>
-                {microphones.map((mic) => (
-                  <option key={mic.deviceId} value={mic.deviceId}>
-                    {mic.label || `Microphone ${mic.deviceId.slice(0, 8)}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            {/* Voice Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-2">🗣️ ElevenLabs Voice</label>
-              <select
-                value={config.elevenlabs_voice_id}
-                onChange={(e) => setConfig({ ...config, elevenlabs_voice_id: e.target.value })}
-                disabled={isConversationActive}
-                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="pNInz6obpgDQGcFmaJgB">Adam (Male - Deep, Authoritative)</option>
-                <option value="yoZ06aMxZJJ28mfd3POQ">Sam (Male - Clear, Professional)</option>
-                <option value="cgSgspJ2msm6clMCkdW9">Eric (Male - Friendly, Warm)</option>
-                <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female - Calm, Clear)</option>
-                <option value="EXAVITQu4vr4xnSDxMaL">Bella (Female - Soft, Young)</option>
-                <option value="jsCqWAovK2LkecY7zXl4">Freya (Female - Expressive, Energetic)</option>
-              </select>
-            </div>
-            
-            {/* LLM Model */}
-            <div>
-              <label className="block text-sm font-medium mb-2">🤖 Language Model</label>
-              <select
-                value={config.llm_model}
-                onChange={(e) => setConfig({ ...config, llm_model: e.target.value })}
-                disabled={isConversationActive}
-                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="gpt-4o-mini">GPT-4o Mini (Fast & Affordable)</option>
-                <option value="gpt-4o">GPT-4o (Best Quality)</option>
-                <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Legacy)</option>
-              </select>
-            </div>
-            
-            {/* Sample Rate */}
-            <div>
-              <label className="block text-sm font-medium mb-2">🎵 Sample Rate</label>
-              <select
-                value={config.sample_rate}
-                onChange={(e) => setConfig({ ...config, sample_rate: Number(e.target.value) })}
-                disabled={isConversationActive}
-                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="8000">8 kHz</option>
-                <option value="16000">16 kHz (Recommended)</option>
-                <option value="24000">24 kHz</option>
-                <option value="48000">48 kHz</option>
-              </select>
-            </div>
-          </div>
-        </div>
-        
-        {/* Controls */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 mb-6 text-center">
-          <div className="flex gap-4 justify-center mb-4">
+    <div
+      className="fixed left-3 top-3 md:left-6 md:top-6 z-[2]
+             w-[calc(100vw-1.5rem)] md:w-[420px]
+             max-h-[calc(100vh-var(--map-controls-inset)-1.5rem)]
+             overflow-auto rounded-2xl border border-black/10 shadow-xl
+             bg-white/90 dark:bg-neutral-900/80 backdrop-blur-xl
+             text-slate-900 dark:text-white p-4 md:p-6"
+    >
+      <div className="flex items-center gap-3 mb-6 text-slate-700 dark:text-slate-200">
+        <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
+        <span className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+          Status
+        </span>
+        <span className="text-base font-medium text-slate-700 dark:text-white">{statusText}</span>
+      </div>
+      
+      <div className="space-y-6">
+        <div className="rounded-xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-neutral-900/70 shadow-sm p-5">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={startConversation}
               disabled={!isConnected || !selectedMicrophone || isConversationActive}
-              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-8 rounded-xl shadow-lg transition-all"
+              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all"
             >
               🎤 Start Conversation
             </button>
@@ -523,50 +447,58 @@ export default function VoiceAgentPage() {
             <button
               onClick={stopConversation}
               disabled={!isConversationActive}
-              className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-8 rounded-xl shadow-lg transition-all"
+              className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all"
             >
               ⏹️ Stop Conversation
             </button>
           </div>
           
           {isConversationActive && (
-            <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-              <p className="text-sm text-gray-300 italic">{interimTranscript}</p>
+            <div className="mt-4 rounded-lg border border-slate-200/70 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 p-3">
+              <p className="text-sm text-slate-600 dark:text-slate-200 italic">{interimTranscript}</p>
             </div>
           )}
         </div>
         
-        {/* Conversation Log */}
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">💬 Conversation History</h2>
-            </div>
-            
-            <div className="bg-slate-900/50 rounded-lg p-4 h-96 overflow-y-auto space-y-3">
-              {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`p-3 rounded-lg border-l-4 ${
-                    msg.type === 'user'
-                      ? 'bg-blue-900/30 border-blue-500'
-                      : msg.type === 'agent'
-                      ? 'bg-green-900/30 border-green-500'
-                      : 'bg-gray-900/30 border-gray-500'
-                  }`}
-                >
-                  <div className="text-xs text-gray-400 mb-1">
-                    {msg.type === 'user' ? 'You' : msg.type === 'agent' ? 'Assistant' : 'System'} - {new Date(msg.timestamp).toLocaleTimeString()}
-                  </div>
-                  <div className="text-sm">{msg.content}</div>
-                </div>
-              ))}
-            </div>
+        <div className="rounded-xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-neutral-900/70 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-white">💬 Conversation History</h2>
+            {messages.length > 0 && (
+              <button
+                onClick={clearLog}
+                className="text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white transition-colors"
+              >
+                Clear
+              </button>
+            )}
           </div>
-        
+          
+          <div className="rounded-lg border border-slate-200/60 dark:border-white/10 bg-slate-50/70 dark:bg-white/5 p-4 h-96 overflow-y-auto space-y-3">
+            {messages.length === 0 && (
+              <p className="text-sm text-slate-500 dark:text-slate-300">No messages yet.</p>
+            )}
+            {messages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`p-3 rounded-lg border ${
+                  msg.type === 'user'
+                    ? 'border-emerald-200 bg-emerald-50/90 text-emerald-900 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-white'
+                    : msg.type === 'agent'
+                    ? 'border-sky-200 bg-sky-50/90 text-sky-900 dark:border-sky-400/40 dark:bg-sky-500/15 dark:text-white'
+                    : 'border-slate-200 bg-slate-50/90 text-slate-700 dark:border-slate-500/40 dark:bg-slate-500/20 dark:text-white'
+                }`}
+              >
+                <div className="text-xs font-medium text-slate-500 dark:text-slate-300 mb-1">
+                  {msg.type === 'user' ? 'You' : msg.type === 'agent' ? 'Assistant' : 'System'} · {new Date(msg.timestamp).toLocaleTimeString()}
+                </div>
+                <div className="text-sm leading-relaxed">
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   )
 }
-

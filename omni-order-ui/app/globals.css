@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --map-controls-inset: 72px;
 }
 
 @theme inline {
@@ -19,8 +20,35 @@
   }
 }
 
+@media (hover: none) {
+  :root {
+    --map-controls-inset: 96px;
+  }
+}
+
+html,
 body {
-  background: var(--background);
+  background: transparent;
+}
+
+body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding-right: var(--map-controls-inset);
+  padding-bottom: var(--map-controls-inset);
+}
+
+.map-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+}
+
+.content-on-map {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
 }
