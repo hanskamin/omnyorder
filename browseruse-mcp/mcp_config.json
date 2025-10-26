@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "browser-use-shopping": {
+      "command": "python",
+      "args": ["/Users/shashikumarp/sideprojects/browser_use/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/Users/shashikumarp/sideprojects/browser_use"
+      }
+    }
+  }
+}
