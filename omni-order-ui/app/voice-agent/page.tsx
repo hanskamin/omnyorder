@@ -179,6 +179,16 @@ export default function VoiceAgentPage() {
         }
         break
       
+      case 'ui_update':
+        // TODO: Handle UI update
+        addDebug('UI', `${data.response}`)
+        break
+      
+      case 'approval_request':
+        // TODO: Handle approval request
+        addDebug('APPROVAL', `${data.request}`)
+        break
+      
       case 'interim_transcript':
         if (data.transcript) {
           setInterimTranscript(data.transcript)
