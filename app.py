@@ -119,8 +119,16 @@ async def generate_agent_reply(
         
         # Generate TTS audio
         tts_audio = await generate_tts_audio(agent_message, session_id, config)
-        
-        return agent_message, tts_audio
+        ui_update = {
+            "restaraunts": [
+                {
+                    "name": "Restaurant 1",
+                    "lat": 30.3108,
+                    "lng": 97.7400,
+                },
+            ]
+        }
+        return agent_message, tts_audio, ui_update
         
     except Exception as e:
         logger.error(f"Session {session_id}: Error generating reply: {e}")
@@ -255,8 +263,13 @@ async def connect_to_flux(session_id: str, websocket: WebSocket):
                                     )
                                     
                                     if result:
-                                        agent_text, audio_data = result
-                                        
+                                        agent_text, audio_data, ui_update = result
+                                        if ui_update:
+                                            await websocket.send_json({
+                                                'type': 'ui_update',
+                                                'response': ui_update,
+                                                'timestamp': datetime.now().isoformat()
+                                            })
                                         # Send text response
                                         await websocket.send_json({
                                             'type': 'agent_response',

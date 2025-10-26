@@ -9,9 +9,9 @@ load_dotenv()
 class VectorDB:
     """Simple vector database using ChromaDB and OpenAI embeddings"""
     
-    def __init__(self, db_path: str = "./chroma_db", collection_name: str = "documents"):
+    def __init__(self, collection_name: str = "documents"):
         """Initialize the vector database"""
-        self.client = chromadb.PersistentClient(path=db_path)
+        self.client = chromadb.HttpClient(host="localhost", port=8000)
         
         # Create OpenAI embedding function
         self.openai_ef = embedding_functions.OpenAIEmbeddingFunction(
@@ -47,23 +47,30 @@ class VectorDB:
     def count(self):
         """Get total number of documents"""
         return self.collection.count()
+    
+    def clear(self):
+        """Delete all documents from the collection"""
+        ids = self.collection.get()["ids"]
+        if ids:
+            self.collection.delete(ids=ids)
 
 
 # Example usage
 if __name__ == "__main__":
     db = VectorDB()
     
-    # Add some text
-    db.add("The quick brown fox jumps over the lazy dog", "doc1")
-    db.add("Python is a great programming language", "doc2")
-    db.add("I love coding in Python", "doc3")
+    # Add dietary preferences
+    db.add("User likes Mexican food and Mexican cuisine", "pref_cuisine_mexican")
+    db.add("User is vegetarian and does not eat meat, chicken, beef, pork, or fish", "pref_diet_vegetarian")
+    db.add("User cannot eat gluten and needs gluten-free options. No wheat, barley, or rye.", "pref_allergy_gluten")
     
-    print(f"✅ Added {db.count()} documents\n")
+    print(f"✅ Added {db.count()} dietary preferences to the database")
     
-    # Query
-    print("🔍 Searching for 'programming':")
-    results = db.query("programming", n_results=2)
+    # Test query
+    print("\n🔍 Testing query for 'dietary preferences':")
+    results = db.query("dietary preferences", n_results=3)
     
     for i, doc in enumerate(results['documents'][0]):
         print(f"{i+1}. {doc}")
         print(f"   Distance: {results['distances'][0][i]:.4f}\n")
+    
