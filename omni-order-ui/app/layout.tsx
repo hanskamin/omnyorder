@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import BackgroundMap from "@/components/map/BackgroundMap";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,10 +25,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <BackgroundMap />
+        <div className="content-on-map">{children}</div>
       </body>
     </html>
   );
