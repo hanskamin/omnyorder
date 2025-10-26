@@ -95,18 +95,6 @@ async def handle_store_dietary_preferences(preferences: str, websocket: WebSocke
     """Mock handler for storing dietary preferences"""
     logger.info(f"Session {session_id}: Storing dietary preferences: {preferences}")
     
-    # Send websocket event
-    await websocket.send_json({
-        'type': 'function_call',
-        'function': 'store_dietary_preferences',
-        'status': 'executing',
-        'data': {'preferences': preferences},
-        'timestamp': datetime.now().isoformat()
-    })
-    
-    # Simulate processing
-    await asyncio.sleep(0.5)
-    
     # Mock response
     result = {
         'success': True,
@@ -129,16 +117,6 @@ async def handle_store_budget_info(budget: str, websocket: WebSocket, session_id
     """Mock handler for storing budget information"""
     logger.info(f"Session {session_id}: Storing budget info: {budget}")
     
-    await websocket.send_json({
-        'type': 'function_call',
-        'function': 'store_budget_info',
-        'status': 'executing',
-        'data': {'budget': budget},
-        'timestamp': datetime.now().isoformat()
-    })
-    
-    await asyncio.sleep(0.5)
-    
     result = {
         'success': True,
         'message': 'Budget information stored successfully',
@@ -160,18 +138,7 @@ async def handle_search_restaurants(dietary_preferences: str, budget: str, order
     """Mock handler for searching restaurants"""
     logger.info(f"Session {session_id}: Searching restaurants - Dietary: {dietary_preferences}, Budget: {budget}, Order: {order_summary}")
     
-    await websocket.send_json({
-        'type': 'function_call',
-        'function': 'search_restaurants',
-        'status': 'executing',
-        'data': {
-            'dietary_preferences': dietary_preferences,
-            'budget': budget,
-            'order_summary': order_summary
-        },
-        'timestamp': datetime.now().isoformat()
-    })
-    
+
     await asyncio.sleep(1.0)
     
     # Mock restaurant data
