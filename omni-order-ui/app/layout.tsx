@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import BackgroundMap from "@/components/map/BackgroundMap";
+import MapProvider from "@/components/map/MapProvider";
 import "./globals.css";
+
+// Preload local Space Grotesk fonts for faster paint
+export const runtime = "edge";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,9 +29,41 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link
+          rel="preload"
+          href="/fonts/spacegrotesk/SpaceGrotesk-Regular.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/spacegrotesk/SpaceGrotesk-Medium.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/spacegrotesk/SpaceGrotesk-SemiBold.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/spacegrotesk/SpaceGrotesk-Bold.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <BackgroundMap />
-        <div className="content-on-map">{children}</div>
+        <MapProvider>
+          <BackgroundMap />
+          <div className="content-on-map">{children}</div>
+        </MapProvider>
       </body>
     </html>
   );

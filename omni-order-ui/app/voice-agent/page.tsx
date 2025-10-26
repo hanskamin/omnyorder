@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useMapMarkers } from '@/hooks/useMapMarkers'
 
 interface Message {
   type: 'user' | 'agent' | 'system'
@@ -46,6 +47,10 @@ export default function VoiceAgentPage() {
   const isRecordingRef = useRef(false)
   const audioQueueRef = useRef<Uint8Array[]>([])
   const isPlayingRef = useRef(false)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  
+  // Map markers hook (demo marker)
+  const { ready: mapReady, addMarker, getMap } = useMapMarkers()
   
   // Add debug message
   const addDebug = useCallback((category: string, message: string) => {
@@ -88,6 +93,120 @@ export default function VoiceAgentPage() {
     }
   }, [addDebug])
   
+  // Play audio (now handles MP3 from ElevenLabs)
+  const playAudio = useCallback(async (audioBytes: Uint8Array) => {
+    try {
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new AudioContext()
+      }
+
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume()
+      }
+
+      const arrayBuffer: ArrayBuffer = audioBytes.buffer.slice(
+        audioBytes.byteOffset,
+        audioBytes.byteOffset + audioBytes.byteLength
+      ) as ArrayBuffer
+
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer)
+
+      const source = audioContextRef.current.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(audioContextRef.current.destination)
+
+      source.onended = () => {
+        updateStatus('listening', 'Listening...')
+      }
+
+      source.start(0)
+      addDebug('AUDIO', `Playing MP3 audio (${audioBytes.length} bytes, ${audioBuffer.duration.toFixed(2)}s)`)
+    } catch (error) {
+      console.error('Error playing audio:', error)
+      addDebug('AUDIO', `Playback error: ${error}`)
+    }
+  }, [updateStatus, addDebug])
+
+  // Handle WebSocket messages
+  const handleWebSocketMessage = useCallback((data) => {
+    const { type } = data
+
+    switch (type) {
+      case 'connected':
+        addDebug('SOCKET', `Session ID: ${data.session_id}`)
+        break
+
+      case 'conversation_started':
+        setIsConversationActive(true)
+        updateStatus('listening', 'Listening...')
+        addDebug('FLUX', 'Conversation started')
+        break
+
+      case 'conversation_stopped':
+        setIsConversationActive(false)
+        updateStatus('idle', 'Conversation stopped')
+        addDebug('FLUX', 'Conversation stopped')
+        break
+
+      case 'speech_started':
+        updateStatus('listening', 'Listening...')
+        setInterimTranscript('Listening...')
+        addDebug('USER', 'Started speaking')
+        break
+
+      case 'user_speech':
+        addMessage('user', data.transcript)
+        setInterimTranscript('Processing...')
+        addDebug('USER', `"${data.transcript}"`)
+        break
+
+      case 'agent_processing':
+        updateStatus('processing', 'Agent thinking...')
+        setInterimTranscript('Agent is thinking...')
+        addDebug('AGENT', 'Processing response')
+        break
+
+      case 'agent_response':
+        addMessage('agent', data.response)
+        addDebug('AGENT', `"${data.response}"`)
+        break
+
+      case 'agent_speaking':
+        updateStatus('speaking', 'Agent speaking...')
+        if (data.audio && data.audio.length > 0) {
+          const audioBytes = new Uint8Array(data.audio)
+          playAudio(audioBytes)
+          addDebug('AGENT', `Playing ${data.audio.length} bytes of audio`)
+        }
+        break
+
+      case 'function_call':
+        const functionCall = data.function_call;
+        console.log('Function call:', functionCall)
+        break
+
+      case 'approval_request':
+        // TODO: Handle approval request
+        addDebug('APPROVAL', `${data.request}`)
+        break
+
+      case 'interim_transcript':
+        if (data.transcript) {
+          setInterimTranscript(data.transcript)
+        }
+        break
+
+      case 'flux_event':
+        addDebug('FLUX', `${data.data.type}`)
+        break
+
+      case 'error':
+        updateStatus('error', `Error: ${data.error}`)
+        addDebug('ERROR', data.error)
+        break
+    }
+  }, [updateStatus, addMessage, addDebug, playAudio])
+
   // Initialize WebSocket
   const initWebSocket = useCallback(() => {
     const ws = new WebSocket('ws://localhost:8000/ws/voice')
@@ -122,89 +241,7 @@ export default function VoiceAgentPage() {
     }
     
     wsRef.current = ws
-  }, [updateStatus, addDebug, ])
-  
-  // Handle WebSocket messages
-  const handleWebSocketMessage = useCallback((data: any) => {
-    const { type } = data
-    
-    switch (type) {
-      case 'connected':
-        addDebug('SOCKET', `Session ID: ${data.session_id}`)
-        break
-      
-      case 'conversation_started':
-        setIsConversationActive(true)
-        updateStatus('listening', 'Listening...')
-        addMessage('system', 'Conversation started')
-        addDebug('FLUX', 'Conversation started')
-        break
-      
-      case 'conversation_stopped':
-        setIsConversationActive(false)
-        updateStatus('idle', 'Conversation stopped')
-        addMessage('system', 'Conversation ended')
-        addDebug('FLUX', 'Conversation stopped')
-        break
-      
-      case 'speech_started':
-        updateStatus('listening', 'Listening...')
-        setInterimTranscript('Listening...')
-        addDebug('USER', 'Started speaking')
-        break
-      
-      case 'user_speech':
-        addMessage('user', data.transcript)
-        setInterimTranscript('Processing...')
-        addDebug('USER', `"${data.transcript}"`)
-        break
-      
-      case 'agent_processing':
-        updateStatus('processing', 'Agent thinking...')
-        setInterimTranscript('Agent is thinking...')
-        addDebug('AGENT', 'Processing response')
-        break
-      
-      case 'agent_response':
-        addMessage('agent', data.response)
-        addDebug('AGENT', `"${data.response}"`)
-        break
-      
-      case 'agent_speaking':
-        updateStatus('speaking', 'Agent speaking...')
-        if (data.audio && data.audio.length > 0) {
-          const audioBytes = new Uint8Array(data.audio)
-          playAudio(audioBytes)
-          addDebug('AGENT', `Playing ${data.audio.length} bytes of audio`)
-        }
-        break
-      
-      case 'ui_update':
-        // TODO: Handle UI update
-        addDebug('UI', `${data.response}`)
-        break
-      
-      case 'approval_request':
-        // TODO: Handle approval request
-        addDebug('APPROVAL', `${data.request}`)
-        break
-      
-      case 'interim_transcript':
-        if (data.transcript) {
-          setInterimTranscript(data.transcript)
-        }
-        break
-      
-      case 'flux_event':
-        addDebug('FLUX', `${data.data.type}`)
-        break
-      
-      case 'error':
-        updateStatus('error', `Error: ${data.error}`)
-        addDebug('ERROR', data.error)
-        break
-    }
-  }, [updateStatus, addMessage, addDebug])
+  }, [updateStatus, addDebug, handleWebSocketMessage])
   
   // Convert float to PCM
   const convertFloatToPcm = (floatData: Float32Array): Int16Array => {
@@ -262,43 +299,6 @@ export default function VoiceAgentPage() {
     isRecordingRef.current = true
     console.log('Audio processing setup complete, isRecordingRef.current =', isRecordingRef.current)
   }, [])
-  
-  // Play audio (now handles MP3 from ElevenLabs)
-  const playAudio = async (audioBytes: Uint8Array) => {
-    try {
-      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-        audioContextRef.current = new AudioContext()
-      }
-      
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume()
-      }
-      
-      // Convert Uint8Array to ArrayBuffer for decoding
-      // ElevenLabs sends MP3, which AudioContext can decode natively
-      const arrayBuffer: ArrayBuffer = audioBytes.buffer.slice(
-        audioBytes.byteOffset,
-        audioBytes.byteOffset + audioBytes.byteLength
-      ) as ArrayBuffer
-      
-      // Decode MP3 audio directly (no WAV wrapper needed)
-      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer)
-      
-      const source = audioContextRef.current.createBufferSource()
-      source.buffer = audioBuffer
-      source.connect(audioContextRef.current.destination)
-      
-      source.onended = () => {
-        updateStatus('listening', 'Listening...')
-      }
-      
-      source.start(0)
-      addDebug('AUDIO', `Playing MP3 audio (${audioBytes.length} bytes, ${audioBuffer.duration.toFixed(2)}s)`)
-    } catch (error) {
-      console.error('Error playing audio:', error)
-      addDebug('AUDIO', `Playback error: ${error}`)
-    }
-  }
   
   // Start conversation
   const startConversation = async () => {
@@ -413,6 +413,13 @@ export default function VoiceAgentPage() {
       wsRef.current?.close()
     }
   }, [])
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
   
   // Get status color
   const getStatusColor = () => {
@@ -428,7 +435,7 @@ export default function VoiceAgentPage() {
   
   return (
     <div
-      className="fixed left-3 top-3 md:left-6 md:top-6 z-[2]
+      className="fixed left-3 top-3 md:left-6 md:top-6 z-2
              w-[calc(100vw-1.5rem)] md:w-[420px]
              max-h-[calc(100vh-var(--map-controls-inset)-1.5rem)]
              overflow-auto rounded-2xl border border-black/10 shadow-xl
@@ -444,22 +451,22 @@ export default function VoiceAgentPage() {
       </div>
       
       <div className="space-y-6">
-        <div className="rounded-xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-neutral-900/70 shadow-sm p-5">
-          <div className="flex flex-wrap gap-3">
+        <div className="rounded-xl bg-transparent dark:bg-neutral-900/70 p-2">
+          <div className="flex flex-wrap gap-3 justify-center w-full">
             <button
               onClick={startConversation}
               disabled={!isConnected || !selectedMicrophone || isConversationActive}
-              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all"
+              className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-transparent disabled:border-gray-400 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-xl transition-all disabled:border flex-1"
             >
-              🎤 Start Conversation
+              Begin
             </button>
             
             <button
               onClick={stopConversation}
               disabled={!isConversationActive}
-              className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all"
+              className="bg-rose-500 hover:bg-rose-600 disabled:bg-transparent disabled:border-gray-400 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-xl transition-all disabled:border flex-1"
             >
-              ⏹️ Stop Conversation
+              Cancel
             </button>
           </div>
           
@@ -470,9 +477,9 @@ export default function VoiceAgentPage() {
           )}
         </div>
         
-        <div className="rounded-xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-neutral-900/70 shadow-sm p-5">
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white/80 dark:bg-neutral-900/70 shadow-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-white">💬 Conversation History</h2>
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Your Order</h2>
             {messages.length > 0 && (
               <button
                 onClick={clearLog}
@@ -483,9 +490,9 @@ export default function VoiceAgentPage() {
             )}
           </div>
           
-          <div className="rounded-lg border border-slate-200/60 dark:border-white/10 bg-slate-50/70 dark:bg-white/5 p-4 h-96 overflow-y-auto space-y-3">
+          <div className="rounded-lg h-96 overflow-y-auto space-y-3">
             {messages.length === 0 && (
-              <p className="text-sm text-slate-500 dark:text-slate-300">No messages yet.</p>
+              <p className="text-sm text-slate-500 dark:text-slate-300">Place an order now!</p>
             )}
             {messages.map((msg, idx) => (
               <div
@@ -499,13 +506,14 @@ export default function VoiceAgentPage() {
                 }`}
               >
                 <div className="text-xs font-medium text-slate-500 dark:text-slate-300 mb-1">
-                  {msg.type === 'user' ? 'You' : msg.type === 'agent' ? 'Assistant' : 'System'} · {new Date(msg.timestamp).toLocaleTimeString()}
+                  {msg.type === 'user' ? 'You' : msg.type === 'agent' ? 'Omni' : 'System'} · {new Date(msg.timestamp).toLocaleTimeString()}
                 </div>
                 <div className="text-sm leading-relaxed">
                   {msg.content}
                 </div>
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
         </div>
       </div>

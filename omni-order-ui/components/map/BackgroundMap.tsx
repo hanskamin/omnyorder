@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useMapMarkers } from '@/hooks/useMapMarkers'
 
 import { getGoogleMapsLoader } from '@/lib/googleMapsLoader'
 
@@ -8,6 +9,7 @@ const AUSTIN = { lat: 30.2672, lng: -97.7431 }
 
 export default function BackgroundMap() {
   const ref = useRef<HTMLDivElement>(null)
+  const { setMap } = useMapMarkers()
 
   useEffect(() => {
     let map: google.maps.Map | undefined
@@ -37,6 +39,8 @@ export default function BackgroundMap() {
           streetViewControl: false,
         })
 
+        setMap(google, map)
+
         navigator.geolocation?.getCurrentPosition(({ coords }) => {
           map?.setCenter({ lat: coords.latitude, lng: coords.longitude })
         })
@@ -49,7 +53,7 @@ export default function BackgroundMap() {
       cancelled = true
       map = undefined
     }
-  }, [])
+  }, [setMap])
 
   return (
     <div
