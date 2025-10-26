@@ -33,6 +33,7 @@ export default function VoiceAgentPage() {
   const [showConfirmOrderButton, setShowConfirmOrderButton] = useState(false)
   const [orderSummary, setOrderSummary] = useState('')
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false)
+  const [isMuted, setIsMuted] = useState(false)
   
   // Configuration
   const [config, setConfig] = useState<Config>({
@@ -132,7 +133,7 @@ export default function VoiceAgentPage() {
   
   const confirmOrder = (summary: string) => {
     // setIsConfirmingOrder(true)
-    wsRef.current?.send(JSON.stringify({ type: 'confirmed_order', summary }))
+    wsRef.current?.send(JSON.stringify({ type: 'confirmed_order', message: summary }))
     console.log('Confirmed order', summary)
   };
 
@@ -568,7 +569,20 @@ export default function VoiceAgentPage() {
     
     wsRef.current?.send(JSON.stringify({ type: 'stop_conversation' }))
     
+    setIsMuted(false)
     addDebug('AUDIO', 'Conversation stopped - all audio processing cleaned up')
+  }
+  
+  // Toggle mute (enable/disable microphone track)
+  const toggleMute = () => {
+    const nextMuted = !isMuted
+    setIsMuted(nextMuted)
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !nextMuted
+      })
+    }
+    addDebug('AUDIO', nextMuted ? 'Muted microphone' : 'Unmuted microphone')
   }
   
   // Clear log
@@ -656,6 +670,14 @@ export default function VoiceAgentPage() {
               className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-transparent disabled:border-gray-400 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-xl transition-all disabled:border flex-1"
             >
               Begin
+            </button>
+            
+            <button
+              onClick={toggleMute}
+              disabled={!isConversationActive}
+              className="bg-slate-500 hover:bg-slate-600 disabled:bg-transparent disabled:border-gray-400 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-xl shadow-xl transition-all disabled:border flex-1"
+            >
+              {isMuted ? 'Unmute' : 'Mute'}
             </button>
             
             <button
